@@ -15,6 +15,12 @@ struct proc *initproc;
 int nextpid = 1;
 struct spinlock pid_lock;
 
+// set the mode & tick as global variable 
+int scheduling_mode = 0; // 0 -> FCFS, 1 -> MLFQ
+int new_tick = 0; 
+
+
+
 extern void forkret(void);
 static void freeproc(struct proc *p);
 
@@ -42,6 +48,21 @@ proc_mapstacks(pagetable_t kpgtbl)
     kvmmap(kpgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
   }
 }
+
+// priority, reset all processes. 
+void boost_priority_all(void) {
+  struct proc *p; 
+  for (p=proc; p<&proc[NPROC]; p++){
+    acquire(&p->lock); 
+    if (p->state == RUNNABLE || p->state == RUNNING || p->state == SLEEPING){
+      p->level = 0; 
+      p->ticks_used = 0; 
+      p->priority = 3; 
+    } 
+    release(&p->lock); 
+  } 
+}
+
 
 // initialize the proc table.
 void
@@ -112,11 +133,11 @@ allocproc(void)
   struct proc *p;
 
   for(p = proc; p < &proc[NPROC]; p++) {
-    acquire(&p->lock);
+    acquire(&p->lock); //lock 잡기
     if(p->state == UNUSED) {
       goto found;
     } else {
-      release(&p->lock);
+      release(&p->lock); //lock 놓기
     }
   }
   return 0;
@@ -124,6 +145,13 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+
+
+  // MLFQ field initialization: 
+  p->level = 0; // from the highest priority
+  p->ticks_used = 0; 
+  p->priority = 3; 
+
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -441,43 +469,120 @@ wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+
+// FCFS, 
 void
 scheduler(void)
 {
-  struct proc *p;
+  // struct proc *p;
   struct cpu *c = mycpu();
-
-  c->proc = 0;
+  c->proc = 0; 
   for(;;){
     // The most recent process to run may have had interrupts
     // turned off; enable them to avoid a deadlock if all
     // processes are waiting.
     intr_on();
 
-    int found = 0;
-    for(p = proc; p < &proc[NPROC]; p++) {
-      acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
+    // This is FCFS scheduler. 
+    if (scheduling_mode == 0)  {
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
+      // a loop to find the earliest creation time out of all RUNNABLE process, 
+      // instead of the first creation time. 
+
+      struct proc *p; 
+      struct proc *earliest = 0; // earliest creation time 
+
+      //int found = 0;
+      for(p = proc; p < &proc[NPROC]; p++) {
+       acquire(&p->lock);
+
+       if(p->state == RUNNABLE) {
+         if (earliest == 0 || p->pid < earliest->pid) {
+
+           if(earliest) release(&earliest->lock); 
+            earliest = p; 
+          } else {
+            release(&p->lock); 
+          }
+
+        } else {
+         release(&p->lock); 
+        }
+     }
+
+      if(earliest) {
+       earliest->state = RUNNING; 
+       c->proc = earliest; 
+       swtch(&c->context, &earliest->context); 
+       c->proc = 0; 
+       release(&earliest->lock); 
+      } else {
+       // no runnable process instead
+       intr_on(); 
+       asm volatile("wfi"); 
       }
-      release(&p->lock);
+
+    } else {
+      // MLFQ scheduler. 
+      struct proc *p; 
+      struct proc *selected = 0; 
+
+      // L0 and L1 Round Robin 
+      // Loops over all processes, and 
+      // select the first RUNNABLE proc in L0 -> L1 
+
+      for (int level = 0; level < 2; level++){
+        for (p=proc; p<&proc[NPROC]; p++){
+          acquire(&p->lock); 
+          if (p->state == RUNNABLE && p->level == level){
+            selected = p; 
+            break; 
+          } else { 
+            release(&p->lock); 
+          }
+        }
+        if (selected) break; // process is selected, break. 
+      }
+
+      // L2, priority scheduling. 
+      if (!selected) {
+        int priority = -1; 
+
+        for (p=proc; p<&proc[NPROC]; p++){
+          acquire(&p->lock); 
+          if(p->state == RUNNABLE && p->level == 2){
+            if (selected == 0 || p->priority > priority) { // priority 
+              if (selected) {
+                release(&selected->lock); // release previously held lock. 
+              } 
+              selected = p; 
+              priority = p->priority; 
+            } else {
+              release(&p->lock); 
+            }
+          } else {
+            release(&p->lock); 
+          }
+        }
+      }
+
+      if (selected){
+        selected->state = RUNNING; 
+        c->proc = selected; 
+
+        swtch (&c->context, &selected->context); 
+
+        c->proc = 0; 
+        release(&selected->lock); 
+      } else {
+        // No RUNNABLE process 
+        intr_on(); // enable interrupt. 
+        asm volatile("wfi"); // wait for the next interrupt. 
+      }
     }
-    if(found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
-      intr_on();
-      asm volatile("wfi");
-    }
+    
   }
+
 }
 
 // Switch to scheduler.  Must hold only p->lock

@@ -21,3 +21,9 @@
 #define SYS_mkdir  20
 #define SYS_close  21
 #define SYS_getppid 22
+#define SYS_getlev 23
+#define SYS_setpriority 24 
+#define SYS_mlfqmode 25
+#define SYS_fcfsmode 26 
+#define SYS_yield 27 
+

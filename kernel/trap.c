@@ -16,6 +16,10 @@ void kernelvec();
 
 extern int devintr();
 
+extern int new_tick;
+extern int scheduling_mode;
+extern void boost_priority_all(void);
+
 void
 trapinit(void)
 {
@@ -33,13 +37,15 @@ trapinithart(void)
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
 //
+
+// tick counting & priority boosting : 
 void
 usertrap(void)
 {
   int which_dev = 0;
 
   if((r_sstatus() & SSTATUS_SPP) != 0)
-    panic("usertrap: not from user mode");
+    panic("usertrap: not from user mode"); 
 
   // send interrupts and exceptions to kerneltrap(),
   // since we're now in the kernel.
@@ -76,10 +82,35 @@ usertrap(void)
   if(killed(p))
     exit(-1);
 
-  // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
+  // give up the CPU if this is a timer interrupt. --> no more in FCFS, 
+  // disabled due to FCFS scheduling, no timer interrupt. 
+   // because FCFS is non-preemptive
 
+
+  if(which_dev == 2){
+    new_tick++; 
+
+    // only when MLFQ, 0: FCFS, 1:MLFQ
+    if (scheduling_mode == 1){
+      p->ticks_used++; 
+
+      int q = (1 << p->level) | 1; //quantum :  L0=1, L1=3, L2=5. 
+
+      if (p->ticks_used >= q) {
+        p->ticks_used = 0; 
+        if (p->level < 2) {
+          p->level++;
+        } yield(); // preempt & demote 
+      }
+
+      // every 50 ticks, reset all processes to L0
+      // preventing starvation. 
+      if (new_tick % 50 == 0) {
+        boost_priority_all(); // priority boosting. 
+      }
+    }
+  } 
+    
   usertrapret();
 }
 

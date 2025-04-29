@@ -20,8 +20,8 @@ initlock(struct spinlock *lk, char *name)
 // Loops (spins) until the lock is acquired.
 void
 acquire(struct spinlock *lk)
-{
-  push_off(); // disable interrupts to avoid deadlock.
+{ 
+  push_off(); // disable interrupts to avoid deadlock. lock의 처음부터 interrupt를 차단한다. 
   if(holding(lk))
     panic("acquire");
 
@@ -31,7 +31,7 @@ acquire(struct spinlock *lk)
   //   amoswap.w.aq a5, a5, (s1)
   while(__sync_lock_test_and_set(&lk->locked, 1) != 0)
     ;
-
+// 하드웨어적으로 구현됨.
   // Tell the C compiler and the processor to not move loads or stores
   // past this point, to ensure that the critical section's memory
   // references happen strictly after the lock is acquired.
@@ -92,8 +92,8 @@ push_off(void)
 
   intr_off();
   if(mycpu()->noff == 0)
-    mycpu()->intena = old;
-  mycpu()->noff += 1;
+    mycpu()->intena = old; 
+  mycpu()->noff += 1; // noff는 lock을 건 갯수. 
 }
 
 void

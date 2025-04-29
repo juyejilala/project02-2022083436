@@ -97,6 +97,9 @@ tags: $(OBJS) _init
 
 ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
 
+user/%.o: user/%.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 _%: %.o $(ULIB)
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $^
 	$(OBJDUMP) -S $@ > $*.asm
@@ -141,6 +144,7 @@ UPROGS=\
 	$U/_wc\
 	$U/_zombie\
 	$U/_ppid\
+	$U/_test\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

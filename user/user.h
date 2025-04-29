@@ -1,4 +1,6 @@
 struct stat;
+typedef unsigned int uint;
+
 
 // system calls
 int fork(void);
@@ -23,6 +25,15 @@ char* sbrk(int);
 int sleep(int);
 int uptime(void);
 int getppid(void); 
+
+//MLFQ system calls
+int getlev(void);
+int setpriority(int pid, int priority);
+int mlfqmode(void);
+int fcfsmode(void);
+int yield(void);
+
+
 
 // ulib.c
 int stat(const char*, struct stat*);

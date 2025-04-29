@@ -141,6 +141,15 @@ int             fetchstr(uint64, char*, int);
 int             fetchaddr(uint64, uint64*);
 void            syscall();
 
+
+// custom MLFQ and FCFS system calls 
+uint64          sys_getlev(void); 
+uint64          sys_setpriority(void); 
+uint64          sys_mlfqmode(void); 
+uint64          sys_fcfsmode(void); 
+uint64          sys_yield(void); 
+
+
 // trap.c
 extern uint     ticks;
 void            trapinit(void);
