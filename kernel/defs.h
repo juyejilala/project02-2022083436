@@ -106,6 +106,9 @@ void            yield(void);
 int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
+int             clone(void (*fcn)(void*, void*), void*, void*, void*);
+int             join(void **);
+
 
 // swtch.S
 void            swtch(struct context*, struct context*);
@@ -148,6 +151,9 @@ uint64          sys_setpriority(void);
 uint64          sys_mlfqmode(void); 
 uint64          sys_fcfsmode(void); 
 uint64          sys_yield(void); 
+uint64          sys_clone(void);
+uint64          sys_join(void);
+
 
 
 // trap.c

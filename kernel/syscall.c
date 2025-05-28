@@ -102,6 +102,8 @@ extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
 extern uint64 sys_getppid(void);
+extern uint64 sys_clone(void); 
+extern uint64 sys_join(void); 
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -132,7 +134,9 @@ static uint64 (*syscalls[])(void) = {
 [SYS_setpriority] sys_setpriority,
 [SYS_mlfqmode] sys_mlfqmode,
 [SYS_fcfsmode] sys_fcfsmode,
-[SYS_yield] sys_yield
+[SYS_yield] sys_yield,
+[SYS_clone] sys_clone,
+[SYS_join] sys_join,
 };
 
 void

@@ -22,8 +22,15 @@ void
 acquire(struct spinlock *lk)
 { 
   push_off(); // disable interrupts to avoid deadlock. lock의 처음부터 interrupt를 차단한다. 
-  if(holding(lk))
+  if(holding(lk)){
+    printf("double acquire detected on lock '%s' (CPU %d, pid %d, proc: %s)\n",
+      lk->name,
+      cpuid(),
+      myproc() ? myproc()->pid : -1,
+      myproc() ? myproc()->name : "none"
+    );
     panic("acquire");
+  }
 
   // On RISC-V, sync_lock_test_and_set turns into an atomic swap:
   //   a5 = 1
@@ -40,15 +47,21 @@ acquire(struct spinlock *lk)
 
   // Record info about lock acquisition for holding() and debugging.
   lk->cpu = mycpu();
+
+  /*printf("[acquire] lock '%s' acquired by CPU %d (proc: %s, pid: %d)\n",
+         lk->name, cpuid(),
+         myproc() ? myproc()->name : "none",
+         myproc() ? myproc()->pid : -1);*/
 }
 
 // Release the lock.
 void
 release(struct spinlock *lk)
 {
-  if(!holding(lk))
-    panic("release");
-
+  if (!holding(lk)) {
+    printf("release: not holding lock %s (cpu=%d)\n", lk->name, cpuid());
+    panic("release not holding");
+  }
   lk->cpu = 0;
 
   // Tell the C compiler and the CPU to not move loads or stores

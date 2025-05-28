@@ -26,4 +26,6 @@
 #define SYS_mlfqmode 25
 #define SYS_fcfsmode 26 
 #define SYS_yield 27 
+#define SYS_clone 28 
+#define SYS_join 29 
 

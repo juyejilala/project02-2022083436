@@ -8,6 +8,7 @@
 #include "elf.h"
 
 static int loadseg(pde_t *, uint64, struct inode *, uint, uint);
+extern struct proc proc[NPROC];
 
 int flags2perm(int flags)
 {
@@ -119,6 +120,16 @@ exec(char *path, char **argv)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
+
+  for (struct proc *t = proc; t < &proc[NPROC]; t++) {
+  if (t != p && t->pagetable == p->pagetable) {
+    acquire(&t->lock);
+    t->killed = 1;
+    if (t->state == SLEEPING)
+      t->state = RUNNABLE;
+    release(&t->lock);
+  }
+}
     
   // Commit to the user image.
   oldpagetable = p->pagetable;

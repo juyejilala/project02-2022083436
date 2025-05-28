@@ -42,3 +42,5 @@ entry("setpriority");
 entry("mlfqmode");
 entry("fcfsmode");
 entry("yield");
+entry("clone");
+entry("join");

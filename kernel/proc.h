@@ -109,4 +109,7 @@ struct proc {
   int level; // current queue level 
   int ticks_used; //  ticks used in current queue level
   int priority; 
+
+  // user provided stack (for join())
+  void *user_stack; 
 };

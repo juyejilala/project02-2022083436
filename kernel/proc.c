@@ -12,6 +12,8 @@ struct proc proc[NPROC];
 
 struct proc *initproc;
 
+struct spinlock memlock;
+
 int nextpid = 1;
 struct spinlock pid_lock;
 
@@ -69,6 +71,7 @@ void
 procinit(void)
 {
   struct proc *p;
+  //initlock(&memlock, "memlock");
   
   initlock(&pid_lock, "nextpid");
   initlock(&wait_lock, "wait_lock");
@@ -78,6 +81,8 @@ procinit(void)
       p->kstack = KSTACK((int) (p - proc));
   }
 }
+
+
 
 // Must be called with interrupts disabled,
 // to prevent race with process being moved
@@ -183,13 +188,21 @@ found:
 static void
 freeproc(struct proc *p)
 {
+
+  if (!holding(&p->lock)) {
+    printf("BUG: freeproc called without holding lock on pid %d\n", p->pid);
+    panic("freeproc lock");
+  }
+
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
   p->sz = 0;
+
   p->pid = 0;
   p->parent = 0;
   p->name[0] = 0;
@@ -197,6 +210,8 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  //release(&p->lock);
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -282,6 +297,7 @@ userinit(void)
   release(&p->lock);
 }
 
+
 // Grow or shrink user memory by n bytes.
 // Return 0 on success, -1 on failure.
 int
@@ -290,17 +306,146 @@ growproc(int n)
   uint64 sz;
   struct proc *p = myproc();
 
+  acquire(&memlock);
+
   sz = p->sz;
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
+      release (&memlock);
       return -1;
     }
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
-  p->sz = sz;
+
+  for (struct proc *t = proc; t < &proc[NPROC]; t++) {
+    if (t->pagetable == p->pagetable) {
+      t->sz = sz;
+    }
+  }
+
+  release(&memlock);
   return 0;
 }
+
+
+//clone: 
+int
+clone(void (*fcn)(void*, void*), void *arg1, void *arg2, void *stack){
+  int i;
+
+  // 1.) allocate a new process struct proc 
+  struct proc *np;
+  struct proc *p = myproc();
+
+  if ((np = allocproc()) == 0)
+    return -1;
+  
+  //acquire(&np->lock);
+
+
+  // 2.) Share address space 
+  if (uvmcopy(p->pagetable, np->pagetable, p->sz) < 0) {
+    freeproc(np);
+    release(&np->lock); 
+    return -1;
+  }
+  // not copying parent's address space 
+  // but pointing to the same pagetable 
+  
+  np->sz = p->sz; // share memory size 
+  np->user_stack = stack; //save stack for join() function. 
+
+
+  // 3.) Copy trapframe and set context 
+  *(np->trapframe) = *(p->trapframe); //copy parent's trapframe 
+  np->trapframe->epc = (uint64)fcn; // start address 
+  np->trapframe->sp = (uint64)stack + PGSIZE; // set to the top of user stack 
+  np->trapframe->a0 = (uint64)arg1; 
+  np->trapframe->a1 = (uint64)arg2;
+
+
+  // 4.) copy file descriptor 
+  for (i = 0; i < NOFILE; i++)
+    if (p->ofile[i]){
+      np->ofile[i] = filedup(p->ofile[i]); //filedup: duplicated file descriptor 
+    }
+  np->cwd = idup(p->cwd); 
+
+  // Set state to RUNNABLE
+  np->state = RUNNABLE;
+  release(&np->lock);
+
+  safestrcpy(np->name, p->name, sizeof(p->name));
+  np->parent = p;
+
+
+  // return new thread's pid 
+  return np->pid;
+}
+
+
+
+// join: 
+int join (void **stack){
+  struct proc *p; 
+  int children_, pid; 
+  struct proc *curproc = myproc();
+
+  // ensuring synchronized acceess to process table 
+  acquire(&wait_lock); // join() and exit() may cause race condition. 
+
+   for(;;){
+    children_=0; // will end the loop when zombie is found, no child thread, or current process is killed. 
+
+    // process table loop 
+    for (p = proc; p < &proc[NPROC]; p++){ // linear search through proc[NPROC] array 
+      // skip unrelated processes 
+     if (p->parent != curproc)
+        continue;
+
+      acquire(&p->lock); 
+      children_ = 1; 
+
+      // looking for zombie thread, finished and called exit() 
+      if (p->state == ZOMBIE){ 
+        // copy thread's user stack pointer to caller 
+        pid = p->pid; 
+        //*stack = p->user_stack;
+        uint64 stackaddr = (uint64)p->user_stack;
+
+        freeproc(p); 
+        release(&p->lock); 
+        release(&wait_lock); 
+
+        if (copyout(curproc->pagetable,
+                    (uint64)stack,
+                    (char *)&stackaddr,
+                    sizeof(stackaddr)) < 0)
+          return -1;
+        
+        return pid; 
+      } 
+        release(&p->lock);
+    }
+
+    //printf("[join] Found ZOMBIE pid %d, returning\n", pid);
+
+
+    // if there are children but no zombie -> sleep. 
+    if(!children_ || killed(curproc)){
+      release(&wait_lock);
+      return -1; 
+    }
+
+    sleep(curproc, &wait_lock); 
+
+   }
+}
+
+
+
+
 
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
@@ -400,13 +545,15 @@ exit(int status)
 
   // Parent might be sleeping in wait().
   wakeup(p->parent);
+
+  release(&wait_lock);
   
   acquire(&p->lock);
 
   p->xstate = status;
   p->state = ZOMBIE;
 
-  release(&wait_lock);
+  //release(&p->lock);
 
   // Jump into the scheduler, never to return.
   sched();
@@ -427,12 +574,13 @@ wait(uint64 addr)
   for(;;){
     // Scan through table looking for exited children.
     havekids = 0;
+
     for(pp = proc; pp < &proc[NPROC]; pp++){
       if(pp->parent == p){
         // make sure the child isn't still in exit() or swtch().
         acquire(&pp->lock);
-
         havekids = 1;
+
         if(pp->state == ZOMBIE){
           // Found one.
           pid = pp->pid;
@@ -702,17 +850,25 @@ wakeup(void *chan)
 int
 kill(int pid)
 {
-  struct proc *p;
+  //int found = 0;
 
-  for(p = proc; p < &proc[NPROC]; p++){
+  for (struct proc *p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
-    if(p->pid == pid){
-      p->killed = 1;
-      if(p->state == SLEEPING){
-        // Wake process from sleep().
-        p->state = RUNNABLE;
-      }
+    if (p->pid == pid) {
+      // Kill all threads sharing the same address space
+      pagetable_t target_pagetable = p->pagetable;
       release(&p->lock);
+
+      for (struct proc *q = proc; q < &proc[NPROC]; q++) {
+        acquire(&q->lock);
+        if (q->pagetable == target_pagetable) {
+          q->killed = 1;
+          if (q->state == SLEEPING)
+            q->state = RUNNABLE;
+        }
+        release(&q->lock);
+      }
+
       return 0;
     }
     release(&p->lock);

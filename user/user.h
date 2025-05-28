@@ -25,6 +25,9 @@ char* sbrk(int);
 int sleep(int);
 int uptime(void);
 int getppid(void); 
+int clone(void (*fcn)(void*, void*), void*, void*, void*);
+int join(void **);
+
 
 //MLFQ system calls
 int getlev(void);
